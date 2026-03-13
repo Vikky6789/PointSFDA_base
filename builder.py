@@ -6,31 +6,26 @@ from timm.scheduler import CosineLRScheduler
 from utils.schedular import GradualWarmupScheduler
 
 from SnowflakeNet.SnowflakeNet_model import SnowflakeNet
-from AdaPoinTr.AdaPoinTr_model import AdaPoinTr
-from PCN.PCN_model import PCN
 from utils.misc import build_lambda_sche, build_lambda_bnsche
-from SeedFormer.SeedFormer_model import SeedFormer
 
-
+# INKO COMMENT OUT KAR DIYA HAI:
+# from AdaPoinTr.AdaPoinTr_model import AdaPoinTr
+# from PCN.PCN_model import PCN
+# from SeedFormer.SeedFormer_model import SeedFormer
 
 def make_model(cfg):
-     
     if cfg.model.name == 'SnowflakeNet':
-        #model = SnowflakeNet(dim_feat=512,up_factors=[2,2])
         model = SnowflakeNet(cfg.model)
     elif cfg.model.name == 'AdaPoinTr':
-        model = AdaPoinTr(config=cfg.model)
+        pass # model = AdaPoinTr(config=cfg.model)
     elif cfg.model.name == 'PCN':
-        model = PCN(config=cfg.model)
+        pass # model = PCN(config=cfg.model)
     elif cfg.model.name == 'SeedFormer':
-        model = SeedFormer(config=cfg.model)
+        pass # model = SeedFormer(config=cfg.model)
     else:
         raise NotImplementedError()
  
     return model
-
-
-
 
 def build_opti_sche(base_model, config):
     opti_config = config.optimizer

@@ -3,6 +3,7 @@ dataset:
   category: chair
   n_points: 2048
   split: train
+  path: /kaggle/input/datasets/sanvik74/3dfuture
 
 model:
   name: SnowflakeNet
@@ -37,7 +38,7 @@ train :
   out_path: ./test
   resume: False
   coarse_num: 256
-  #source_model_path: ./pretrained_source/snow_crn.pth
+  source_model_path: /kaggle/input/models/sanvik74/pretrained-source-models/pytorch/default/1/snowflakenet_crn.pth
   #model_path: /data1/xp/experiments/completion/pretrained/ckpt-best-c3d-rec.pth
 
 
@@ -47,5 +48,4 @@ test :
   num_workers: 1
   gpu: [0]
   loss_func: cd_l2
-  #model_path: ../pretrained_source/ckpt-best-048.pth
-  #model_path: /data1/xp/experiments/completion/pretrained/ckpt-best-c3d-rec.pth
+  model_path: /kaggle/input/models/sanvik74/pretrained-source-models/pytorch/default/1/snowflakenet_crn.pth

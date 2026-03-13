@@ -1,2 +1,5 @@
 tensorboardX
 open3d
+plyfile
+trimesh
+pytorch3d @ git+https://github.com/facebookresearch/pytorch3d.git

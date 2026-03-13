@@ -5,17 +5,13 @@ import os.path
 import torch
 import numpy as np
 from numpy.random import RandomState
-import h5py
 import random
-from tqdm import tqdm
 import pickle
-import h5py
 import glob
 from utils.io import read_ply_xyz, read_ply_from_file_list
 from utils.pc_transform import swap_axis
 from data.real_dataset import RealWorldPointsDataset
 from plyfile import PlyData
-
 
 def get_stems_from_pickle(test_split_pickle_path):
     """
@@ -37,7 +33,6 @@ class PlyDataset(data.Dataset):
     with GT: PartNet, each subdir under args.dataset_path contains 
         the partial shape raw.ply and complete shape ply-2048.txt.
         Dataset provided by MPC
-
     """
     def __init__(self, args):
         self.dataset = args.dataset.name
@@ -88,11 +83,8 @@ class RealDataset(data.Dataset):
     with GT: PartNet, each subdir under args.dataset_path contains 
         the partial shape raw.ply and complete shape ply-2048.txt.
         Dataset provided by MPC
-
     """
     def __init__(self, args):
-        #self.dataset = args.dataset
-        #self.dataset_path = args.dataset_path
         self.dataset = args.dataset.name #'ScanNet'
         self.random_seed = 0
         self.split = args.dataset.split
@@ -164,57 +156,62 @@ class KITTIDataset():
 
 class GeneratedDataset(data.Dataset):
     """
-    datasets that with Ply format
-    without GT: MatterPort, ScanNet, KITTI
-        Datasets provided by pcl2pcl
-    with GT: PartNet, each subdir under args.dataset_path contains 
-        the partial shape raw.ply and complete shape ply-2048.txt.
-        Dataset provided by MPC
-
+    Fixed Version for Kaggle:
+    Supports dynamic paths from args.dataset.path and flat .npy folder structures.
     """
     def __init__(self, args):
-        #self.dataset = args.dataset
-        #self.dataset_path = args.dataset_path
-        self.dataset = args.dataset.name #'ModelNet'
-        #self.category = args.save_inversion_path.split('/')[-3].split('_')[-1]
+        self.dataset = args.dataset.name 
         self.category = args.dataset.category
         self.split = args.dataset.split
         self.inputs = []
         self.gts = []
         self.classes = []
+        
         if self.dataset == 'ModelNet':
             self.cat_ordered_list = ['plane', 'chair', 'sofa', 'table', 'lamp', 'car']
-            self.dataset_path = '/workspace/dataset/PointCloudCompletion/ModelNet40/'
         elif self.dataset =='3D_FUTURE':
             self.cat_ordered_list = ['chair', 'sofa', 'table', 'lamp', 'cabinet']
-            self.dataset_path = '/mnt/star/datasets/OptDE/3D_FUTURE_Completion/'
         else:
             raise NotImplementedError
-        print("Load "+self.dataset+" "+self.split+" dataset")
-        if self.category=='all':
+            
+        # 🔥 FIX 1: Read path from yaml config instead of hardcoding
+        self.dataset_path = args.dataset.path
+        print(f"Load {self.dataset} {self.split} dataset from {self.dataset_path}")
+
+        # 🔥 FIX 2: Helper function to support flat folders without split/category subdirs
+        def load_paths(cat_name):
+            structured_path = os.path.join(self.dataset_path, cat_name, self.split)
+            search_path = structured_path if os.path.exists(structured_path) else self.dataset_path
+            
+            comp_files = sorted(glob.glob(os.path.join(search_path, '*complete.npy')))
+            part_files = sorted(glob.glob(os.path.join(search_path, '*partial.npy')))
+            
+            # If no complete/partial suffix found, grab all .npy files (fallback for Kaggle flat data)
+            if len(part_files) == 0 and len(comp_files) == 0:
+                all_npy = sorted(glob.glob(os.path.join(search_path, '*.npy')))
+                return all_npy, all_npy
+            return part_files, comp_files
+
+        if self.category == 'all':
             for cat in self.cat_ordered_list:
                 cat_id = self.cat_ordered_list.index(cat.lower())
-                self.path = self.dataset_path + cat+ '/' + self.split
-                complete_pathnames = sorted(glob.glob(self.path + '/*complete.npy'))
-                partial_pathnames = sorted(glob.glob(self.path + '/*partial.npy'))
-                self.inputs = self.inputs+[np.load(itm).astype(np.float32) for itm in partial_pathnames]
-                self.gts = self.gts+[np.load(itm).astype(np.float32) for itm in complete_pathnames]
-                self.classes = self.classes+[cat_id]*len(complete_pathnames)
-
+                part_files, comp_files = load_paths(cat)
+                
+                self.inputs.extend([np.load(itm).astype(np.float32) for itm in part_files])
+                self.gts.extend([np.load(itm).astype(np.float32) for itm in comp_files])
+                self.classes.extend([cat_id] * len(part_files))
         else:
             cat_id = self.cat_ordered_list.index(self.category.lower())
-            self.path = self.dataset_path + self.category + '/' + self.split
-            complete_pathnames = sorted(glob.glob(self.path + '/*complete.npy'))
-            partial_pathnames = sorted(glob.glob(self.path + '/*partial.npy'))
-            self.inputs =  [np.load(itm).astype(np.float32) for itm in partial_pathnames]
-            self.gts =  [np.load(itm).astype(np.float32) for itm in complete_pathnames]
-            self.classes = [cat_id] * len(complete_pathnames)
+            part_files, comp_files = load_paths(self.category)
+            
+            self.inputs = [np.load(itm).astype(np.float32) for itm in part_files]
+            self.gts = [np.load(itm).astype(np.float32) for itm in comp_files]
+            self.classes = [cat_id] * len(part_files)
 
         self.num_view = 5
         self.random_seed = 0
         self.rand_gen = RandomState(self.random_seed)
 
-        #print(len(self.gts),len(self.inputs),len(self.classes))
     def __getitem__(self, index):
         if self.dataset in ['ModelNet', '3D_FUTURE']:
             label = self.classes[index]

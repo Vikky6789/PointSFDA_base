@@ -180,11 +180,19 @@ class GeneratedDataset(data.Dataset):
 
         # 🔥 FIX 2: Helper function to support flat folders without split/category subdirs
         def load_paths(cat_name):
-            structured_path = os.path.join(self.dataset_path, cat_name, self.split)
-            search_path = structured_path if os.path.exists(structured_path) else self.dataset_path
-            
-            comp_files = sorted(glob.glob(os.path.join(search_path, '*complete.npy')))
-            part_files = sorted(glob.glob(os.path.join(search_path, '*partial.npy')))
+            # NEW LOGIC: Support for clean folder structures (train/complete/ & train/partial/)
+            comp_folder = os.path.join(self.dataset_path, self.split, 'complete')
+            part_folder = os.path.join(self.dataset_path, self.split, 'partial')
+
+            if os.path.exists(comp_folder) and os.path.exists(part_folder):
+                comp_files = sorted(glob.glob(os.path.join(comp_folder, '*.npy')))
+                part_files = sorted(glob.glob(os.path.join(part_folder, '*.npy')))
+            else:
+                # Fallback to original PointSFDA flat naming convention
+                structured_path = os.path.join(self.dataset_path, cat_name, self.split)
+                search_path = structured_path if os.path.exists(structured_path) else self.dataset_path
+                comp_files = sorted(glob.glob(os.path.join(search_path, '*complete.npy')))
+                part_files = sorted(glob.glob(os.path.join(search_path, '*partial.npy')))
             
             # If no complete/partial suffix found, grab all .npy files (fallback for Kaggle flat data)
             if len(part_files) == 0 and len(comp_files) == 0:

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# @Author: XP
+# @Author: Sanvik
 
 from easydict import EasyDict as edict
 

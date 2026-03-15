@@ -1,6 +1,6 @@
 #! /usr/bin/python3
 # -*- coding: utf-8 -*-
-# @Author: Peng Xiang
+# @Author: Sanvik
 
 import torch
 import torch.nn as nn

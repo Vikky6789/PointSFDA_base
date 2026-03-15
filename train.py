@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -*- coding: utf-8 -*-
-# @Author: XP
+# @Author: Sanvik
 
 import os
 import torch

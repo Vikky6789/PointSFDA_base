@@ -57,7 +57,7 @@ def train(cfg):
         # shuffle=False,
         shuffle=True,
         num_workers=cfg.train.num_workers,
-        pin_memory=True)
+        pin_memory=False) # 🔥 FIX: Changed to False to prevent Kaggle freeze
 
     cfg.dataset.split = 'test'
     if cfg.dataset.name in ['MatterPort', 'ScanNet', 'PartNet','KITTI']:
@@ -73,7 +73,7 @@ def train(cfg):
         batch_size=1,
         shuffle=False,
         num_workers=cfg.test.num_workers,
-        pin_memory=True)
+        pin_memory=False) # 🔥 FIX: Changed to False
 
     output_dir = os.path.join(cfg.train.out_path, datetime.now().isoformat(), '%s', )
     cfg.train.checkpoints = output_dir % 'checkpoints'

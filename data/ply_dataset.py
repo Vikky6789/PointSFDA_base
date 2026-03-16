@@ -180,7 +180,7 @@ class GeneratedDataset(data.Dataset):
 
         # 🔥 FIX 2: Helper function to support flat folders without split/category subdirs
         def load_paths(cat_name):
-            # NEW LOGIC: Support for clean folder structures (train/complete/ & train/partial/)
+           # NEW: Support for clean directory structure (train/complete & train/partial)
             comp_folder = os.path.join(self.dataset_path, self.split, 'complete')
             part_folder = os.path.join(self.dataset_path, self.split, 'partial')
 

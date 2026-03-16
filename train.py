@@ -54,10 +54,9 @@ def train(cfg):
     train_data_loader = DataLoader(
         train_dataset,
         batch_size=cfg.train.batch_size,
-        # shuffle=False,
         shuffle=True,
         num_workers=cfg.train.num_workers,
-        pin_memory=False) # 🔥 FIX: Changed to False to prevent Kaggle freeze
+        pin_memory=False) # 👈 Ye False hona chahiye
 
     cfg.dataset.split = 'test'
     if cfg.dataset.name in ['MatterPort', 'ScanNet', 'PartNet','KITTI']:

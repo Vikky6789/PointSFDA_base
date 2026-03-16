@@ -3,7 +3,7 @@ dataset:
   category: chair 
   n_points: 2048
   split: train
-  path: /kaggle/input/datasets/sanvik74/3dfuture-processed # Defaulting to Kaggle path
+  path: /kaggle/input/datasets/sanvik74/3dfuture-processed  # 🔥 ADD THIS LINE
 
 model:
   name: SnowflakeNet

@@ -175,7 +175,10 @@ class GeneratedDataset(data.Dataset):
             raise NotImplementedError
             
         # 🔥 FIX 1: Read path from yaml config instead of hardcoding
-        self.dataset_path = args.dataset.path
+        # self.dataset_path = args.dataset.path
+        # 💡 PRO TIP (Safety Fix):
+        # Agar kabhi 'path' missing ho toh code crash na kare, isiliye isko aise likh sakte ho:
+        self.dataset_path = getattr(args.dataset, 'path', '/kaggle/input/datasets/sanvik74/3dfuture-processed')
         print(f"Load {self.dataset} {self.split} dataset from {self.dataset_path}")
 
         # 🔥 FIX 2: Helper function to support flat folders without split/category subdirs

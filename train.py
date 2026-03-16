@@ -205,6 +205,10 @@ def train(cfg):
                 t.set_description(
                     '[Epoch %d/%d][Batch %d/%d]' % (epoch_idx, cfg.train.epochs, batch_idx + 1, n_batches))
                 t.set_postfix(loss='%s' % ['%.4f' % l for l in [ucd, ucd_coarse, cd_coarse, consistency]])
+                # 🔥 TERA CUSTOM STEP-BY-STEP LOGGER 🔥
+                # Har 1 batch ke baad terminal pe ek detail print karega
+                if batch_idx % 1 == 0:
+                    logging.info(f"👉 [Epoch {epoch_idx}] Batch {batch_idx}/{n_batches} processed! | UCD Loss: {ucd:.4f} | CD Coarse: {cd_coarse:.4f}")
                 # t.set_postfix(loss='%s' % ['%.4f' % l for l in [ucd,  consistency]])
                 if cfg.scheduler.type == 'GradualWarmup':
                     if n_itr < cfg.scheduler.kwargs_2.total_epoch:

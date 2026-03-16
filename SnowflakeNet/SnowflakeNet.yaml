@@ -3,7 +3,7 @@ dataset:
   category: chair 
   n_points: 2048
   split: train
-  path: /kaggle/input/datasets/sanvik74/3dfuture-processed  # 🔥 ADD THIS LINE
+  path: /kaggle/input/datasets/sanvik74/3dfuture-processed
 
 model:
   name: SnowflakeNet
@@ -30,19 +30,19 @@ scheduler: {
 
 train :
   seed: 1
-  device: [0]          # FIXED: Kaggle uses GPU 0
-  batch_size: 16       # FIXED: 16 is stable for 16GB VRAM
-  num_workers: 0       # FIXED: Reduced to prevent CPU bottleneck
+  device: [0]
+  batch_size: 16
+  num_workers: 0
   epochs: 300
   save_freq: 200
   out_path: ./outpath_snow
   resume: False
   coarse_num: 256
-  source_model_path: /kaggle/input/models/sanvik74/pretrained-source-models/pytorch/default/1/snowflakenet_crn.pth # FIXED
+  source_model_path: /kaggle/input/models/sanvik74/pretrained-source-models/pytorch/default/1/snowflakenet_crn.pth
 
 test :
   split: test
   batch_size: 1 
   num_workers: 0
-  gpu: [0]             # FIXED
+  gpu: [0]
   loss_func: cd_l2

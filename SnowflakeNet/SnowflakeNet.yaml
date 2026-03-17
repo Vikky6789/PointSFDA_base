@@ -8,7 +8,7 @@ dataset:
 model:
   name: SnowflakeNet
   dim_feat: 512 
-  up_factors: [ 2, 4]
+  up_factors: [ 2, 2]
   num_pc: 256
   num_p0: 512
   bounding: True
@@ -34,7 +34,7 @@ train :
   batch_size: 16
   num_workers: 0
   epochs: 300
-  save_freq: 200
+  save_freq: 50
   out_path: ./outpath_snow
   resume: False
   coarse_num: 256

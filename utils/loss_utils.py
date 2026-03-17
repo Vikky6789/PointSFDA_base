@@ -14,28 +14,35 @@ from extensions.expansion_penalty.expansion_penalty_module import expansionPenal
 chamfer_dist = chamfer_3DDist()
 penalty_func = expansionPenaltyModule()
 
-# --- BUG FIX: NATIVE REPLACEMENT FOR MISSING 'pointops' LIBRARY ---
+# --- PERMANENT FIX FOR MISSING POINTOPS ---
 class NativePointOps:
     @staticmethod
     def knn(xyz, new_xyz, k):
-        # Uses the existing local square_distance function (Line 85)
+        # Uses existing square_distance function in this file
         sqrdists = square_distance(new_xyz, xyz)
         dist, group_idx = torch.topk(sqrdists, k, dim=-1, largest=False, sorted=False)
         return group_idx, dist
 
     @staticmethod
     def index_points(points, idx):
-        # Uses the existing local index_points function (Line 118)
-        return index_points(points, idx)
+        # Uses existing index_points function in this file
+        device = points.device
+        B = points.shape[0]
+        view_shape = list(idx.shape)
+        view_shape[1:] = [1] * (len(view_shape) - 1)
+        repeat_shape = list(idx.shape)
+        repeat_shape[0] = 1
+        batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
+        new_points = points[batch_indices, idx, :]
+        return new_points
 
     @staticmethod
     def fps(xyz, num):
-        # Uses the existing local fps_subsample function (Line 17)
+        # Uses existing fps_subsample function in this file
         return fps_subsample(xyz, num)
 
-# Wire the ghost calls to our native PyTorch implementation
 pointops = NativePointOps()
-# ------------------------------------------------------------------
+# ------------------------------------------
 
 def fps_subsample(pcd, n_points=2048):
     """

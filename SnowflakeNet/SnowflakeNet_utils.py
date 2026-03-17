@@ -6,7 +6,7 @@ import torch
 from torch import nn, einsum
 from pointnet2_ops.pointnet2_utils import furthest_point_sample, \
     gather_operation, ball_query, three_nn, three_interpolate, grouping_operation
-from timm.models.layers import DropPath
+from timm.layers import DropPath
 class Conv1d(nn.Module):
     def __init__(self, in_channel, out_channel, kernel_size=1, stride=1,  if_bn=True, activation_fn=torch.relu):
         super(Conv1d, self).__init__()

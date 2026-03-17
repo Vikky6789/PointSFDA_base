@@ -85,30 +85,30 @@ def train(cfg):
     train_writer = SummaryWriter(os.path.join(cfg.train.logs, 'train'))
     val_writer = SummaryWriter(os.path.join(cfg.train.logs, 'test'))
 
+    # Build models
     # model = Point_MAE()
     # model = PCN()
     model = builder.make_model(cfg)
     source_model = builder.make_model(cfg)
-    
-    # 🔥 FIX 1: Wrap dono ko DataParallel mein kar aur dono ko .cuda() bhej
-    if torch.cuda.is_available():
-        model = torch.nn.DataParallel(model).cuda()
-        source_model = torch.nn.DataParallel(source_model).cuda()
-        
-    # 🔥 FIX 2: map_location='cpu' lagana mandatory hai taaki Kaggle ka GPU crash na ho
+
+    # 1. Load checkpoints safely on CPU first to avoid device ordinal errors
     checkpoint = torch.load(cfg.train.source_model_path, map_location='cpu')
     model.load_state_dict(checkpoint['model'])
     
     source_checkpoint = torch.load(cfg.train.source_model_path, map_location='cpu')
     source_model.load_state_dict(source_checkpoint['model'])
-    
-    logging.info('✅ Load the source model successfully on GPU 0.')
+
+    # 2. Move BOTH models to GPU properly
+    if torch.cuda.is_available():
+        model = torch.nn.DataParallel(model).cuda()
+        source_model = torch.nn.DataParallel(source_model).cuda() # Added .cuda() here
+        
+    logging.info(f'✅ Successfully loaded source model on GPU from {cfg.train.source_model_path}')
 
     optimizer, scheduler = builder.build_opti_sche(model, cfg)
     init_epoch = 0
     best_metrics = float('inf')
     steps = 0
-    ####这里没考虑分布式
 
 
 

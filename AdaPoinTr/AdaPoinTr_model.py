@@ -6,7 +6,7 @@
 import torch
 import torch.nn as nn
 from functools import partial, reduce
-from timm.models.layers import DropPath, trunc_normal_
+from timm.layers import DropPath, trunc_normal_
 import sys
 sys.path.append("..")
 from AdaPoinTr.Transformer_utils import *

@@ -3,7 +3,7 @@ dataset:
   category: chair 
   n_points: 2048
   split: train
-  path: /kaggle/input/datasets/sanvik74/3dfuture-processed
+  path: /kaggle/working/subset_3dfuture_2k #/kaggle/input/datasets/sanvik74/3dfuture-processed
 
 model:
   name: SnowflakeNet

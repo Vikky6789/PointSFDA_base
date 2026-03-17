@@ -8,7 +8,7 @@ dataset:
 model:
   name: SnowflakeNet
   dim_feat: 512 
-  up_factors: [ 2, 2]
+  up_factors: [ 2, 4]
   num_pc: 256
   num_p0: 512
   bounding: True

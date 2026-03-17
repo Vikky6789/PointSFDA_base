@@ -14,6 +14,29 @@ from extensions.expansion_penalty.expansion_penalty_module import expansionPenal
 chamfer_dist = chamfer_3DDist()
 penalty_func = expansionPenaltyModule()
 
+# --- BUG FIX: NATIVE REPLACEMENT FOR MISSING 'pointops' LIBRARY ---
+class NativePointOps:
+    @staticmethod
+    def knn(xyz, new_xyz, k):
+        # Uses the existing local square_distance function (Line 85)
+        sqrdists = square_distance(new_xyz, xyz)
+        dist, group_idx = torch.topk(sqrdists, k, dim=-1, largest=False, sorted=False)
+        return group_idx, dist
+
+    @staticmethod
+    def index_points(points, idx):
+        # Uses the existing local index_points function (Line 118)
+        return index_points(points, idx)
+
+    @staticmethod
+    def fps(xyz, num):
+        # Uses the existing local fps_subsample function (Line 17)
+        return fps_subsample(xyz, num)
+
+# Wire the ghost calls to our native PyTorch implementation
+pointops = NativePointOps()
+# ------------------------------------------------------------------
+
 def fps_subsample(pcd, n_points=2048):
     """
     Args

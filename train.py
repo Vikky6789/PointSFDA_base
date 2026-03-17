@@ -91,13 +91,28 @@ def train(cfg):
     model = builder.make_model(cfg)
     source_model = builder.make_model(cfg)
 
-    # 1. Load checkpoints safely on CPU first to avoid device ordinal errors
-    checkpoint = torch.load(cfg.train.source_model_path, map_location='cpu')
-    model.load_state_dict(checkpoint['model'])
-    
-    source_checkpoint = torch.load(cfg.train.source_model_path, map_location='cpu')
-    source_model.load_state_dict(source_checkpoint['model'])
+  # 1. Load checkpoints & Strip 'module.' prefix (Multi-GPU to Single-GPU fix)
+    from collections import OrderedDict
 
+    def load_my_state_dict(model_to_load, path):
+        checkpoint = torch.load(path, map_location='cpu')
+        state_dict = checkpoint['model']
+        new_state_dict = OrderedDict()
+        
+        for k, v in state_dict.items():
+            # Agar key 'module.' se start ho rahi hai, toh use hata do (first 7 chars)
+            name = k[7:] if k.startswith('module.') else k
+            new_state_dict[name] = v
+        
+        model_to_load.load_state_dict(new_state_dict)
+        return checkpoint
+
+    # Load for both main model and source model
+    logging.info(f'🔄 Stripping "module." prefixes and loading from: {cfg.train.source_model_path}')
+    checkpoint = load_my_state_dict(model, cfg.train.source_model_path)
+    source_checkpoint = load_my_state_dict(source_model, cfg.train.source_model_path)
+    
+    logging.info('✅ Weights loaded successfully on base models!')
     # 2. Move BOTH models to GPU properly
     if torch.cuda.is_available():
         model = torch.nn.DataParallel(model).cuda()

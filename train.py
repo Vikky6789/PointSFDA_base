@@ -27,6 +27,7 @@ from data.ScanSalon_dataset import ScanSalonDataset
 from utils.loss_utils import get_loss, get_real_loss, get_distill_loss, get_cd, get_ucd
 from utils.misc import *
 from validate import validate
+from collections import OrderedDict
 
 def set_seed(seed):
     random.seed(seed)
@@ -91,50 +92,45 @@ def train(cfg):
     model = builder.make_model(cfg)
     source_model = builder.make_model(cfg)
 
-  # 1. Load checkpoints & Strip 'module.' prefix (Multi-GPU to Single-GPU fix)
-    from collections import OrderedDict
-
-    def load_my_state_dict(model_to_load, path):
-        checkpoint = torch.load(path, map_location='cpu')
-        state_dict = checkpoint['model']
-        new_state_dict = OrderedDict()
-        
-        for k, v in state_dict.items():
-            # Agar key 'module.' se start ho rahi hai, toh use hata do (first 7 chars)
-            name = k[7:] if k.startswith('module.') else k
-            new_state_dict[name] = v
-        
-        model_to_load.load_state_dict(new_state_dict)
-        return checkpoint
-
-    # Load for both main model and source model
-    logging.info(f'🔄 Stripping "module." prefixes and loading from: {cfg.train.source_model_path}')
-    checkpoint = load_my_state_dict(model, cfg.train.source_model_path)
-    source_checkpoint = load_my_state_dict(source_model, cfg.train.source_model_path)
+    # 1. Surgical Helper: Strips 'module.' and loads weights
     
-    logging.info('✅ Weights loaded successfully on base models!')
-    # 2. Move BOTH models to GPU properly
+    def load_cleaned_model(m, path):
+        ckpt = torch.load(path, map_location='cpu')
+        sd = ckpt['model']
+        new_sd = OrderedDict()
+        for k, v in sd.items():
+            name = k[7:] if k.startswith('module.') else k
+            new_sd[name] = v
+        
+        # Agar model already DataParallel mein wrap ho chuka hai (Resume case)
+        target = m.module if hasattr(m, 'module') else m
+        target.load_state_dict(new_sd)
+        return ckpt
+
+    # Initial Loading for Student and Teacher
+    logging.info(f'🔄 Initializing Student & Teacher from: {cfg.train.source_model_path}')
+    checkpoint = load_cleaned_model(model, cfg.train.source_model_path)
+    source_checkpoint = load_cleaned_model(source_model, cfg.train.source_model_path)
+    
+    # 2. Move BOTH models to GPU
     if torch.cuda.is_available():
         model = torch.nn.DataParallel(model).cuda()
-        source_model = torch.nn.DataParallel(source_model).cuda() # Added .cuda() here
-        
-    logging.info(f'✅ Successfully loaded source model on GPU from {cfg.train.source_model_path}')
+        source_model = torch.nn.DataParallel(source_model).cuda()
+    
+    logging.info('✅ Weights loaded and models moved to GPU!')
 
     optimizer, scheduler = builder.build_opti_sche(model, cfg)
     init_epoch = 0
     best_metrics = float('inf')
-    steps = 0
-
-
-
     source_ema = EMA(source_model, model)
 
+    # 3. Resume Training Fix (Surgical Strike on 'WEIGHTS' block)
     if 'WEIGHTS' in cfg.train:
         logging.info('Recovering from %s ...' % (cfg.train.model_path))
-        checkpoint = torch.load(cfg.train.model_path)
-        best_metrics = checkpoint['best_metrics']
-        model.load_state_dict(checkpoint['model'])
-        logging.info('Recover complete. Current epoch = #%d; best metrics = %s.' % (init_epoch, best_metrics))
+        # Reuse our helper to avoid 'module.' errors during recovery
+        recovery_ckpt = load_cleaned_model(model, cfg.train.model_path)
+        best_metrics = recovery_ckpt.get('best_metrics', float('inf'))
+        logging.info('✅ Recovery complete.')
 
     # Training/Testing the network
     for epoch_idx in range(init_epoch + 1, cfg.train.epochs + 1):
@@ -261,12 +257,13 @@ def train(cfg):
              ['%.4f' % l for l in [avg_ucd, avg_ucd_coarse, avg_cd_coarse, avg_consistency]]))
 
         with open(log_path, "a") as file_object:
-            msg = "##########EPOCH {:0>4d}##########".format(epoch_idx)
-            file_object.write(msg + '\n')
-            # file_object.write("Training UCD Consistency:" + "%.4f"%avg_ucd + " %.4f" % avg_consistency+'\n')
-            file_object.write(
-                "Training UCD UCD_Coarse CD_Coarse Consistency:" + "%.4f" % avg_ucd + " %.4f" % avg_ucd_coarse + " %.4f" % avg_cd_coarse + " %.4f" % avg_consistency + '\n')
-
+            # ✅ Sab kuch ek hi line mein bracket ke andar
+            file_object.write(f"##########EPOCH {epoch_idx:04d}##########\\n")
+            
+            # ✅ Is line ko bhi check karle, ek hi line mein honi chahiye
+            log_msg = f"Training UCD UCD_Coarse CD_Coarse Consistency: {avg_ucd:.4f} {avg_ucd_coarse:.4f} {avg_cd_coarse:.4f} {avg_consistency:.4f}\\n"
+            file_object.write(log_msg)
+            
         # Validate the current model
         loss_eval = validate(cfg, epoch_idx, val_dataset, val_data_loader, val_writer, model, source_model, test=False)
 
@@ -291,7 +288,9 @@ def train(cfg):
             if loss_eval < best_metrics:
                 best_metrics = loss_eval
                 with open(log_path, "a") as file_object:
-                    file_object.write('Save ckpt-best.pth...................\n')
+                    file_object.write('Save ckpt-best.pth...................\\n')
 
     train_writer.close()
     val_writer.close()
+
+  

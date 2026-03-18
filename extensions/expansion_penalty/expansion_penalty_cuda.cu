@@ -153,8 +153,8 @@ int expansion_penalty_cuda_forward(at::Tensor xyz, int primitive_size, at::Tenso
 	const auto batch_size = xyz.size(0);
 	const auto n = xyz.size(1); 
 	
-	calc_penalty<<<dim3(batch_size, n / primitive_size, 1), primitive_size>>>(batch_size, n, primitive_size, xyz.data<float>(), idx.data<int>(), dist.data<float>(),
-																	 alpha, neighbor.data<int>(), cost.data<float>(), mean_mst_length.data<float>());
+	calc_penalty<<<dim3(batch_size, n / primitive_size, 1), primitive_size>>>(batch_size, n, primitive_size, xyz.data_ptr<float>(), idx.data_ptr<int>(), dist.data_ptr<float>(),
+																	 alpha, neighbor.data_ptr<int>(), cost.data_ptr<float>(), mean_mst_length.data_ptr<float>());
 
 	cudaError_t err = cudaGetLastError();
 	  if (err != cudaSuccess) {
@@ -187,7 +187,7 @@ int expansion_penalty_cuda_backward(at::Tensor xyz, at::Tensor gradxyz, at::Tens
 	const auto batch_size = xyz.size(0);
 	const auto n = xyz.size(1); 
 
-	calc_grad<<<dim3(batch_size, 8, 1), 1024>>>(batch_size, n, xyz.data<float>(), graddist.data<float>(), idx.data<int>(), gradxyz.data<float>());
+	calc_grad<<<dim3(batch_size, 8, 1), 1024>>>(batch_size, n, xyz.data_ptr<float>(), graddist.data_ptr<float>(), idx.data_ptr<int>(), gradxyz.data_ptr<float>());
 	
 	cudaError_t err = cudaGetLastError();
 	  if (err != cudaSuccess) {

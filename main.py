@@ -5,12 +5,15 @@
 import sys
 import os
 
-# 🔥 --- PATH HIJACK FOR LOCAL COMPILED MODULES ---
-# Ye assure karega ki pip wali purani files load na hon
+# 🔥 --- THE ULTIMATE PATH HIJACK ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Har compiled module ka exact address Python ko de do
 sys.path.insert(0, os.path.join(BASE_DIR, 'pointnet2_ops_lib'))
+sys.path.insert(0, os.path.join(BASE_DIR, 'extensions', 'expansion_penalty'))
+sys.path.insert(0, os.path.join(BASE_DIR, 'extensions', 'chamfer_dist'))
+sys.path.insert(0, os.path.join(BASE_DIR, 'Chamfer3D'))
 sys.path.insert(0, BASE_DIR)
-# ------------------------------------------------
+# ----------------------------------
 
 import logging
 import argparse

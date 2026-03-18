@@ -1,6 +1,7 @@
 import glob
 import os
 import os.path as osp
+import torch # <--- Added
 
 from setuptools import find_packages, setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
@@ -16,9 +17,12 @@ requirements = ["torch>=1.4"]
 
 exec(open(osp.join("pointnet2_ops", "_version.py")).read())
 
-# 🔥 YAHAN CHANGE KIYA HAI: Purane 3.7 aur 5.0 hata diye, aur modern 8.0, 8.6 add kar diye.
-# Kaggle ka T4 GPU 7.5 use karta hai, aur P100 6.0 use karta hai.
-os.environ["TORCH_CUDA_ARCH_LIST"] = "6.0;7.0;7.5;8.0;8.6"
+# ✅ DYNAMIC GPU DETECTION (H100/L4 Compatible)
+if torch.cuda.is_available():
+    major, minor = torch.cuda.get_device_capability()
+    os.environ["TORCH_CUDA_ARCH_LIST"] = f"{major}.{minor}"
+else:
+    os.environ["TORCH_CUDA_ARCH_LIST"] = "6.0;7.0;7.5;8.0;8.6;8.9;9.0"
 
 setup(
     name="pointnet2_ops",

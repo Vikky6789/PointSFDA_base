@@ -31,8 +31,8 @@ scheduler: {
 train :
   seed: 1
   device: [0]
-  batch_size: 16
-  num_workers: 0
+  batch_size: 32
+  num_workers: 16
   epochs: 300
   save_freq: 50
   out_path: ./outpath_snow
@@ -43,6 +43,6 @@ train :
 test :
   split: test
   batch_size: 1 
-  num_workers: 0
+  num_workers: 8
   gpu: [0]
   loss_func: cd_l2

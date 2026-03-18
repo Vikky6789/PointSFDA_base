@@ -6,6 +6,7 @@ import os
 import torch
 import logging
 import sys
+import random
 # import utils.data_loaders
 import utils.helpers
 from datetime import datetime
@@ -57,7 +58,7 @@ def train(cfg):
         batch_size=cfg.train.batch_size,
         shuffle=True,
         num_workers=cfg.train.num_workers,
-        pin_memory=False) # 👈 Ye False hona chahiye
+        pin_memory=True) # 👈 Ye False hona chahiye
 
     cfg.dataset.split = 'test'
     if cfg.dataset.name in ['MatterPort', 'ScanNet', 'PartNet','KITTI']:
@@ -73,9 +74,9 @@ def train(cfg):
         batch_size=1,
         shuffle=False,
         num_workers=cfg.test.num_workers,
-        pin_memory=False) # 🔥 FIX: Changed to False
+        pin_memory=True) # 🔥 FIX: Changed to False
 
-    output_dir = os.path.join(cfg.train.out_path, datetime.now().isoformat(), '%s', )
+    output_dir = os.path.join(cfg.train.out_path, datetime.now().strftime('%Y-%m-%d_%H-%M-%S'), '%s')
     cfg.train.checkpoints = output_dir % 'checkpoints'
     cfg.train.logs = output_dir % 'logs'
     log_path = cfg.train.logs + '.txt'
@@ -112,10 +113,14 @@ def train(cfg):
     checkpoint = load_cleaned_model(model, cfg.train.source_model_path)
     source_checkpoint = load_cleaned_model(source_model, cfg.train.source_model_path)
     
-    # 2. Move BOTH models to GPU
-    if torch.cuda.is_available():
-        model = torch.nn.DataParallel(model).cuda()
-        source_model = torch.nn.DataParallel(source_model).cuda()
+    ## 2. Move BOTH models to GPU
+    # if torch.cuda.is_available():
+    #     model = torch.nn.DataParallel(model).cuda()
+    #     source_model = torch.nn.DataParallel(source_model).cuda()
+    device = torch.device("cuda")
+    model = model.to(device)
+    source_model = source_model.to(device)
+    scaler = torch.cuda.amp.GradScaler() # H100 ke liye ye yahan define kar
     
     logging.info('✅ Weights loaded and models moved to GPU!')
 
@@ -127,10 +132,11 @@ def train(cfg):
     # 3. Resume Training Fix (Surgical Strike on 'WEIGHTS' block)
     if 'WEIGHTS' in cfg.train:
         logging.info('Recovering from %s ...' % (cfg.train.model_path))
-        # Reuse our helper to avoid 'module.' errors during recovery
         recovery_ckpt = load_cleaned_model(model, cfg.train.model_path)
+        # ✅ Ye line add kar:
+        init_epoch = recovery_ckpt.get('epoch_index', 0) 
         best_metrics = recovery_ckpt.get('best_metrics', float('inf'))
-        logging.info('✅ Recovery complete.')
+        logging.info(f'✅ Recovery complete. Resuming from Epoch {init_epoch}')
 
     # Training/Testing the network
     for epoch_idx in range(init_epoch + 1, cfg.train.epochs + 1):
@@ -154,60 +160,110 @@ def train(cfg):
         with tqdm(train_data_loader) as t:
             for batch_idx, data in enumerate(t):
                 data_time.update(time() - batch_end_time)
-                if cfg.dataset.name in ['ScanNet', 'MatterPort', 'KITTI']:
+                if cfg.dataset.name in ['ScanNet', 'MatterPort', 'KITTI', 'PartNet']: # Added PartNet
                     partial, index = data
                 elif cfg.dataset.name in ['ModelNet', '3D_FUTURE', 'CRN', 'ScanSalon']:
                     gt, partial, index = data
+                
+                ### WITHOUT H100
+                    
+                # bs, _, _ = partial.shape
+                # partial = partial.float().cuda()  # [16, 2048, 3]
+                # mask_partial = mask_aug(partial)
+
+
+                # student_out = model(mask_partial.contiguous())
+                # pcd_pred = student_out[-1] #[32, 2048, 3]
+                # coarse_pcd = student_out[0]
+                # # b = int(bs/2)
+                
+                # pcd_pred1 = pcd_pred[0:bs, :, :]
+                # pcd_pred2 = pcd_pred[bs:, :, :]
+                
+                # assert pcd_pred1.shape == pcd_pred2.shape
+                # coarse_pcd1 = coarse_pcd[0:bs, :, :]  ###
+                # coarse_pcd2 = coarse_pcd[bs:, :, :]  ###
+        
+                # assert coarse_pcd1.shape == coarse_pcd2.shape
+
+                # with torch.no_grad():
+
+                #     source_out = source_model(partial.contiguous())
+                #     coarse_source = source_out[0]  ######
+                #     source_pred = source_out[-1]
+
+                # sample_source = fps_subsample(source_pred, 256)  #####
+                # loss_ucd_coarse = get_ucd(sample_source, pcd_pred1, sqrt=False) + get_ucd(sample_source, pcd_pred2, sqrt=False)
+
+                # ucd_coarse = loss_ucd_coarse.item() * 1e4
+                # total_ucd_coarse += ucd_coarse
+
+                # assert coarse_pcd1.shape[1] == coarse_pcd2.shape[1] == coarse_source.shape[1]
+                # loss_cd_coarse = get_cd(coarse_pcd1, coarse_source, sqrt=False) + get_cd(coarse_pcd2, coarse_source,sqrt=False)
+                # cd_coarse = loss_cd_coarse.item() * 1e4
+                # total_cd_coarse += cd_coarse
+
+                # loss_complete = get_ucd( partial,pcd_pred1, sqrt=False) + get_ucd( partial,pcd_pred2, sqrt=False)  # L2UCD UHD
+                # ucd = loss_complete.item() * 1e4
+                # total_ucd += ucd
+
+                # loss_consistency = get_cd(pcd_pred1, pcd_pred2, sqrt=False)
+                # consistency = loss_consistency.item() * 1e4
+                # total_consistency += consistency
+
+                # loss_total = loss_cd_coarse + loss_complete * 1e2 + loss_ucd_coarse + loss_consistency * 1e2
+
+                # optimizer.zero_grad()
+                # loss_total.backward()
+                # optimizer.step()
+                
+                
+                # Purana logic hata kar ye daal:
                 bs, _, _ = partial.shape
-                partial = partial.float().cuda()  # [16, 2048, 3]
+                partial = partial.float().to(device)
                 mask_partial = mask_aug(partial)
 
+                # 🔥 H100 Power Mode Start
+                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                    student_out = model(mask_partial.contiguous())
+                    pcd_pred = student_out[-1]
+                    coarse_pcd = student_out[0]
+                    
+                    pcd_pred1, pcd_pred2 = pcd_pred[0:bs], pcd_pred[bs:]
+                    coarse_pcd1, coarse_pcd2 = coarse_pcd[0:bs], coarse_pcd[bs:]
 
-                student_out = model(mask_partial.contiguous())
-                pcd_pred = student_out[-1] #[32, 2048, 3]
-                coarse_pcd = student_out[0]
-                # b = int(bs/2)
-                
-                pcd_pred1 = pcd_pred[0:bs, :, :]
-                pcd_pred2 = pcd_pred[bs:, :, :]
-                
-                assert pcd_pred1.shape == pcd_pred2.shape
-                coarse_pcd1 = coarse_pcd[0:bs, :, :]  ###
-                coarse_pcd2 = coarse_pcd[bs:, :, :]  ###
-        
-                assert coarse_pcd1.shape == coarse_pcd2.shape
+                    with torch.no_grad():
+                        source_out = source_model(partial.contiguous())
+                        coarse_source, source_pred = source_out[0], source_out[-1]
 
-                with torch.no_grad():
+                    sample_source = fps_subsample(source_pred, 256)
+                    
+                    # Losses (Isi block ke andar rahenge)
+                    loss_ucd_coarse = get_ucd(sample_source, pcd_pred1, sqrt=False) + get_ucd(sample_source, pcd_pred2, sqrt=False)
+                    loss_cd_coarse = get_cd(coarse_pcd1, coarse_source, sqrt=False) + get_cd(coarse_pcd2, coarse_source, sqrt=False)
+                    loss_complete = get_ucd(partial, pcd_pred1, sqrt=False) + get_ucd(partial, pcd_pred2, sqrt=False)
+                    loss_consistency = get_cd(pcd_pred1, pcd_pred2, sqrt=False)
 
-                    source_out = source_model(partial.contiguous())
-                    coarse_source = source_out[0]  ######
-                    source_pred = source_out[-1]
+                    # --- STATS EXTRACTION (Inhe define karna zaroori hai) ---
+                    ucd = loss_complete.item() * 1e4
+                    ucd_coarse = loss_ucd_coarse.item() * 1e4
+                    cd_coarse = loss_cd_coarse.item() * 1e4
+                    consistency = loss_consistency.item() * 1e4
 
-                sample_source = fps_subsample(source_pred, 256)  #####
-                loss_ucd_coarse = get_ucd(sample_source, pcd_pred1, sqrt=False) + get_ucd(sample_source, pcd_pred2, sqrt=False)
+                    # Epoch totals update (varna avg zero aayega)
+                    total_ucd += ucd
+                    total_ucd_coarse += ucd_coarse
+                    total_cd_coarse += cd_coarse
+                    total_consistency += consistency
+                    
+                    loss_total = loss_cd_coarse + loss_complete * 1e2 + loss_ucd_coarse + loss_consistency * 1e2
 
-                ucd_coarse = loss_ucd_coarse.item() * 1e4
-                total_ucd_coarse += ucd_coarse
-
-                assert coarse_pcd1.shape[1] == coarse_pcd2.shape[1] == coarse_source.shape[1]
-                loss_cd_coarse = get_cd(coarse_pcd1, coarse_source, sqrt=False) + get_cd(coarse_pcd2, coarse_source,sqrt=False)
-                cd_coarse = loss_cd_coarse.item() * 1e4
-                total_cd_coarse += cd_coarse
-
-                loss_complete = get_ucd( partial,pcd_pred1, sqrt=False) + get_ucd( partial,pcd_pred2, sqrt=False)  # L2UCD UHD
-                ucd = loss_complete.item() * 1e4
-                total_ucd += ucd
-
-                loss_consistency = get_cd(pcd_pred1, pcd_pred2, sqrt=False)
-                consistency = loss_consistency.item() * 1e4
-                total_consistency += consistency
-
-                loss_total = loss_cd_coarse + loss_complete * 1e2 + loss_ucd_coarse + loss_consistency * 1e2
-
+                # 🔥 Optimized Backward
                 optimizer.zero_grad()
-                loss_total.backward()
-                optimizer.step()
-
+                scaler.scale(loss_total).backward() 
+                scaler.step(optimizer)
+                scaler.update()
+                
                 n_itr = (epoch_idx - 1) * n_batches + batch_idx
 
                 train_writer.add_scalar('Loss/Batch/ucd', ucd, n_itr)
@@ -223,7 +279,7 @@ def train(cfg):
                 t.set_postfix(loss='%s' % ['%.4f' % l for l in [ucd, ucd_coarse, cd_coarse, consistency]])
                 # 🔥 TERA CUSTOM STEP-BY-STEP LOGGER 🔥
                 # Har 1 batch ke baad terminal pe ek detail print karega
-                if batch_idx % 1 == 0:
+                if batch_idx % 20 == 0:
                     logging.info(f"👉 [Epoch {epoch_idx}] Batch {batch_idx}/{n_batches} processed! | UCD Loss: {ucd:.4f} | CD Coarse: {cd_coarse:.4f}")
                 # t.set_postfix(loss='%s' % ['%.4f' % l for l in [ucd,  consistency]])
                 if cfg.scheduler.type == 'GradualWarmup':

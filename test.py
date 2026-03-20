@@ -62,7 +62,19 @@ def test(cfg, epoch_idx=-1, test_dataset = None, test_data_loader=None, test_wri
 
         print('Recovering from %s ...' % (cfg.test.model_path))
         checkpoint = torch.load(cfg.test.model_path)
-        model.load_state_dict(checkpoint['model'])
+        
+        # --- THE DATAPARALLEL FIX ---
+        state_dict = checkpoint['model']
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            # Agar key me pehle se 'module.' nahi hai, toh add kar do
+            if not k.startswith('module.'):
+                new_state_dict['module.' + k] = v
+            else:
+                new_state_dict[k] = v
+                
+        model.load_state_dict(new_state_dict)
+        # ----------------------------
 
     # Switch models to evaluation mode
     model.eval()

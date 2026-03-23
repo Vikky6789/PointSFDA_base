@@ -316,33 +316,31 @@ class Decoder(nn.Module):#(B,512,1)
 
 class SnowflakeNet(nn.Module):
     def __init__(self, config):
-    #def __init__(self, dim_feat=512, num_pc=256, num_p0=512, radius=1, up_factors=None):
-        """
-        Args:
-            dim_feat: int, dimension of global feature
-            num_pc: int
-            num_p0: int
-            radius: searching radius
-            up_factors: list of int
-        """
-       
         super(SnowflakeNet, self).__init__()
         self.feat_extractor = FeatureExtractor(out_dim=config.dim_feat)
         self.decoder = Decoder(dim_feat=config.dim_feat, num_pc=config.num_pc, num_p0=config.num_p0, radius=config.radius, up_factors=config.up_factors)
 
-    def forward(self, point_cloud, return_P0=False):
-        """
-        Args:
-            point_cloud: (B, N, 3)
-        """
-        pcd_bnc = point_cloud
-        point_cloud = point_cloud.permute(0, 2, 1).contiguous()#[16, 3, 2048]
+        # ==================================================
+        # 🎛️ POINTMAC SWITCH
+        # ==================================================
+        self.use_pointmac = getattr(config, 'use_pointmac', False)
+        
+        if self.use_pointmac:
+            print("🟢 PointMAC MAML Mode Activated! Loading Bi-Aux Units...")
+            self.mae_aux = ExtendedModel(self, dim_feat=config.dim_feat)
+            self.denoise_aux = ExtendedModel2(self, aux1M=self.mae_aux)
 
-        feat = self.feat_extractor(point_cloud) #(B,512,1)
-        #print(feat.shape)
-        #out = self.decoder(feat, pcd_bnc, return_P0=return_P0)####################
-        out = self.decoder(feat, pcd_bnc, return_P0=return_P0)#([32, 256, 3])
-        # for i in range(len(out)):
-        #     print(out[i].shape)
-        # print(feat.shape)
+    def forward(self, point_cloud, return_P0=False, return_aux=False):
+        pcd_bnc = point_cloud
+        point_cloud = point_cloud.permute(0, 2, 1).contiguous()
+
+        feat = self.feat_extractor(point_cloud)
+        out = self.decoder(feat, pcd_bnc, return_P0=return_P0)
+
+        if self.use_pointmac and return_aux:
+            aux_outputs = {}
+            aux_outputs['mae_rec'] = self.mae_aux(pcd_bnc)
+            aux_outputs['denoise_offset'] = self.denoise_aux(pcd_bnc)
+            return out, aux_outputs
+
         return out

@@ -105,7 +105,7 @@ def train(cfg):
         
         # Agar model already DataParallel mein wrap ho chuka hai (Resume case)
         target = m.module if hasattr(m, 'module') else m
-        target.load_state_dict(new_sd)
+        target.load_state_dict(new_sd, strict=False)
         return ckpt
 
     # Initial Loading for Student and Teacher
@@ -402,5 +402,3 @@ def train(cfg):
 
     train_writer.close()
     val_writer.close()
-
-  

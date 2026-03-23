@@ -45,6 +45,7 @@ if __name__ == '__main__':
     cfg = yaml_reader.read_yaml(args.config)
 
     cfg.use_pointmac = args.use_pointmac
+    if 'model' in cfg: cfg.model.use_pointmac = args.use_pointmac
     
     set_seed(cfg.train.seed)
     logging.basicConfig(format='[%(levelname)s] %(asctime)s %(message)s', level=logging.DEBUG)

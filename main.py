@@ -36,6 +36,7 @@ def get_args_from_command_line():
     parser = argparse.ArgumentParser(description='The argument parser of SnowflakeNet')
     parser.add_argument('--config', type=str, default='./configs/snow.yaml', help='Configuration File')
     parser.add_argument('--test', dest='test', help='Test neural networks', action='store_true')
+    parser.add_argument('--use_pointmac', action='store_true', help='Enable PointMAC MAML Training & TTA')
     args = parser.parse_args()
     return args
 
@@ -43,6 +44,8 @@ if __name__ == '__main__':
     args = get_args_from_command_line()
     cfg = yaml_reader.read_yaml(args.config)
 
+    cfg.use_pointmac = args.use_pointmac
+    
     set_seed(cfg.train.seed)
     logging.basicConfig(format='[%(levelname)s] %(asctime)s %(message)s', level=logging.DEBUG)
     torch.backends.cudnn.benchmark = True

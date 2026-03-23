@@ -125,6 +125,17 @@ def train(cfg):
     logging.info('✅ Weights loaded and models moved to GPU!')
 
     optimizer, scheduler = builder.build_opti_sche(model, cfg)
+    
+    # 👇 YE BLOCK ADD KAR (PointMAC Lambda Setup):
+    if getattr(cfg, 'use_pointmac', False):
+        logging.info("🧠 Initializing PointMAC Meta-Learning Lambdas...")
+        param_device = next(model.parameters()).device
+        lambda_smr = torch.tensor(0.0, device=param_device, requires_grad=True)
+        lambda_ad = torch.tensor(0.0, device=param_device, requires_grad=True)
+        lambda_optimizer = torch.optim.Adam([lambda_smr, lambda_ad], lr=1e-3)
+        meta_weight = 1.0
+    # 👆 ==========================================
+    
     init_epoch = 0
     best_metrics = float('inf')
     source_ema = EMA(source_model, model)
@@ -226,7 +237,14 @@ def train(cfg):
                 # 🔥 H100 Power Mode Start
                 with torch.amp.autocast("cuda", enabled=False):
                     mask_partial = mask_partial.float()
-                    student_out = model(mask_partial.contiguous())
+                    
+                    # 👇 POINTMAC MODULAR FORWARD PASS
+                    if getattr(cfg, 'use_pointmac', False):
+                        student_out, aux_outputs = model(mask_partial.contiguous(), return_aux=True)
+                    else:
+                        student_out = model(mask_partial.contiguous())
+                    # 👆 ==========================================
+                    
                     pcd_pred = student_out[-1]
                     coarse_pcd = student_out[0]
                     
@@ -245,24 +263,59 @@ def train(cfg):
                     loss_complete = get_ucd(partial, pcd_pred1, sqrt=False) + get_ucd(partial, pcd_pred2, sqrt=False)
                     loss_consistency = get_cd(pcd_pred1, pcd_pred2, sqrt=False)
 
-                    # --- STATS EXTRACTION (Inhe define karna zaroori hai) ---
+                    # --- STATS EXTRACTION ---
                     ucd = loss_complete.item() * 1e4
                     ucd_coarse = loss_ucd_coarse.item() * 1e4
                     cd_coarse = loss_cd_coarse.item() * 1e4
                     consistency = loss_consistency.item() * 1e4
 
-                    # Epoch totals update (varna avg zero aayega)
+                    # Epoch totals update
                     total_ucd += ucd
                     total_ucd_coarse += ucd_coarse
                     total_cd_coarse += cd_coarse
                     total_consistency += consistency
                     
-                    loss_total = loss_cd_coarse + loss_complete * 1e2 + loss_ucd_coarse + loss_consistency * 1e2
+                    # Base Loss (Original)
+                    loss_main = loss_cd_coarse + loss_complete * 1e2 + loss_ucd_coarse + loss_consistency * 1e2
+                    loss_total = loss_main
+
+                    # ---------------------------------------------------------
+                    # 2. POINTMAC AUXILIARY LOSS CALCULATION & LAMBDA BALANCING
+                    if getattr(cfg, 'use_pointmac', False):
+                        mae_rec = aux_outputs['mae_rec']                # [2*bs, N, 3]
+                        denoise_offset = aux_outputs['denoise_offset']  # [2*bs, M, 3]
+                        
+                        # Split just like your original predictions
+                        mae_rec1, mae_rec2 = mae_rec[0:bs], mae_rec[bs:]
+                        
+                        # Aux1: Masking Loss (Compare reconstructed mask with original partial)
+                        loss_aux1 = get_cd(mae_rec1, partial, sqrt=False) * 1e2 + get_cd(mae_rec2, partial, sqrt=False) * 1e2
+                        
+                        # Aux2: Denoising Offset Loss (Minimize offset magnitude)
+                        loss_aux2 = torch.mean(denoise_offset ** 2) * 1e2 
+
+                        # Meta-learned weighting λ (Adaptive Balancer)
+                        alpha_tilde = torch.log(1 + lambda_smr ** 2)
+                        beta_tilde = torch.log(1 + lambda_ad ** 2)
+                        w_smr = torch.exp(alpha_tilde) / (torch.exp(alpha_tilde) + torch.exp(beta_tilde))
+                        w_ad = 1.0 - w_smr
+
+                        # Final Loss Combining Main and Aux
+                        loss_aux_total = w_smr * loss_aux1 + w_ad * loss_aux2
+                        loss_total = loss_main + meta_weight * loss_aux_total
+                    # ---------------------------------------------------------
 
                 # 🔥 Optimized Backward
                 optimizer.zero_grad()
+                if getattr(cfg, 'use_pointmac', False):
+                    lambda_optimizer.zero_grad() # Clear lambda gradients
+                    
                 scaler.scale(loss_total).backward() 
+    
                 scaler.step(optimizer)
+                if getattr(cfg, 'use_pointmac', False):
+                    scaler.step(lambda_optimizer) # Update lambdas
+                
                 scaler.update()
                 
                 n_itr = (epoch_idx - 1) * n_batches + batch_idx

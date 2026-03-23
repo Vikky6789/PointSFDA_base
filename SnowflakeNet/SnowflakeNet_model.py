@@ -4,9 +4,163 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F # Added for PointMAC ITSI
 from SnowflakeNet.SnowflakeNet_utils import PointNet_SA_Module_KNN, MLP_Res, MLP_CONV, fps_subsample, Transformer
 from SnowflakeNet.skip_transformer import SkipTransformer
 
+# ==========================================================================================
+# 🚀 POINTMAC MODULAR COMPONENTS START (Auxiliary Heads for MAML & TTA)
+# ==========================================================================================
+
+class DecoderFC(nn.Module):
+    def __init__(self, n_features=(256, 256), latent_dim=128, output_pts=2048, bn=False):
+        super(DecoderFC, self).__init__()
+        self.n_features = list(n_features)
+        self.output_pts = output_pts
+        self.latent_dim = latent_dim
+
+        model = []
+        prev_nf = self.latent_dim
+        for idx, nf in enumerate(self.n_features):
+            fc_layer = nn.Linear(prev_nf, nf)
+            model.append(fc_layer)
+            if bn:
+                bn_layer = nn.BatchNorm1d(nf)
+                model.append(bn_layer)
+            act_layer = nn.LeakyReLU(inplace=True)
+            model.append(act_layer)
+            prev_nf = nf
+
+        fc_layer = nn.Linear(self.n_features[-1], output_pts*3)
+        model.append(fc_layer)
+        self.model = nn.Sequential(*model)
+
+    def forward(self, x):
+        x = self.model(x)
+        x = x.view((-1, 3, self.output_pts))
+        return x
+
+class ITSI(nn.Module):
+    def __init__(self, in_dim=512, latent_dim=128, token_channels=64, num_tokens=1024):
+        super(ITSI, self).__init__()
+        self.latent_fc = nn.Linear(in_dim, latent_dim)
+        self.token_fc = nn.Sequential(
+            nn.Linear(in_dim, token_channels * num_tokens),
+            nn.BatchNorm1d(token_channels * num_tokens),
+        )
+        self.token_channels = token_channels
+        self.num_tokens = num_tokens
+
+    def forward(self, global_feat):
+        latent = self.latent_fc(global_feat)
+        tokens = self.token_fc(global_feat)
+        tokens = F.relu(tokens).view(-1, self.token_channels, self.num_tokens)
+        return latent, tokens
+
+class ExtendedModel(nn.Module):
+    """ Auxsmr head: Stochastic Masked Reconstruction branch """
+    def __init__(self, original_model, dim_feat=512):
+        super(ExtendedModel, self).__init__()
+        # ADAPTED: Direct link to SnowflakeNet's FeatureExtractor
+        self.feat_extractor_ex = original_model.feat_extractor
+        self.mask_ratio = 0.6
+        self.number_fine = 8192
+        self.itsi = ITSI(in_dim=dim_feat, latent_dim=128, token_channels=64, num_tokens=1024)
+        self.decoder = DecoderFC(n_features=(256, 256), latent_dim=128, output_pts=2048, bn=False)
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def _random_mask_points(self, x):
+        if self.mask_ratio <= 0 or not self.training:
+            return x
+        B, N, C = x.shape
+        N_keep = max(1, int(N * (1.0 - self.mask_ratio)))
+        noise = torch.rand(B, N, device=x.device)
+        ids_keep = torch.topk(noise, k=N_keep, dim=1, largest=False)[1]
+        ids_keep_expanded = ids_keep.unsqueeze(-1).expand(-1, -1, C)
+        visible_x = torch.gather(x, dim=1, index=ids_keep_expanded)
+        return visible_x
+
+    def forward(self, x):
+        bs, n, _ = x.shape
+        x_visible = self._random_mask_points(x)
+        pc_x = x_visible.permute(0, 2, 1).contiguous()
+        
+        # ADAPTED for SnowflakeNet: returns only 1 value (z3)
+        z3 = self.feat_extractor_ex(pc_x) 
+        global_feat = torch.max(z3, dim=2)[0] # (B, dim_feat)
+        
+        z_latent, _ = self.itsi(global_feat)
+        x_rec = self.decoder(z_latent)
+        return x_rec.transpose(1, 2).contiguous()
+
+class SelfAttentionUnit(nn.Module):
+    def __init__(self, in_channels):
+        super(SelfAttentionUnit, self).__init__()
+        self.to_q = nn.Sequential(nn.Conv1d(3 + in_channels, 2 * in_channels, 1, bias=False), nn.BatchNorm1d(2 * in_channels), nn.ReLU(inplace=True))
+        self.to_k = nn.Sequential(nn.Conv1d(3 + in_channels, 2 * in_channels, 1, bias=False), nn.BatchNorm1d(2 * in_channels), nn.ReLU(inplace=True))
+        self.to_v = nn.Sequential(nn.Conv1d(3 + in_channels, 2 * in_channels, 1, bias=False), nn.BatchNorm1d(2 * in_channels), nn.ReLU(inplace=True))
+        self.fusion = nn.Sequential(nn.Conv1d(2 * in_channels, in_channels, 1, bias=False), nn.BatchNorm1d(in_channels), nn.ReLU(inplace=True))
+
+    def forward(self, x):
+        q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
+        attention_map = torch.matmul(q.permute(0, 2, 1), k)
+        value = torch.matmul(attention_map, v.permute(0, 2, 1)).permute(0, 2, 1).contiguous()
+        return self.fusion(value)
+
+class OffsetRegression(nn.Module):
+    def __init__(self, in_channels):
+        super(OffsetRegression, self).__init__()
+        self.coordinate_regression = nn.Sequential(nn.Conv1d(in_channels, 256, 1), nn.ReLU(inplace=True), nn.Conv1d(256, 64, 1), nn.ReLU(inplace=True), nn.Conv1d(64, 3, 1), nn.Sigmoid())
+        self.range_max = 0.5
+    def forward(self, x):
+        offset = self.coordinate_regression(x)
+        offset = offset * self.range_max * 2 - self.range_max
+        return offset.permute(0, 2, 1).contiguous()
+
+class ExtendedModel2(nn.Module):
+    """ Auxad head: Artifact Denoising branch """
+    def __init__(self, original_model, aux1M=None):
+        super(ExtendedModel2, self).__init__()
+        self.feat_extractor_ex = original_model.feat_extractor
+        if aux1M is not None and hasattr(aux1M, "itsi"):
+            self.itsi = aux1M.itsi
+        else:
+            self.itsi = ITSI(in_dim=512, latent_dim=128, token_channels=64, num_tokens=1024)
+        self.sa = SelfAttentionUnit(in_channels=61)
+        self.offset = OffsetRegression(in_channels=61)
+
+    def forward(self, pts):
+        device = pts.device
+        self.feat_extractor_ex = self.feat_extractor_ex.to(device)
+        self.itsi = self.itsi.to(device)
+        self.sa = self.sa.to(device)
+        self.offset = self.offset.to(device)
+
+        pc_x = pts.permute(0, 2, 1).contiguous()
+        
+        # ADAPTED for SnowflakeNet
+        z3 = self.feat_extractor_ex(pc_x)
+        global_feat = torch.max(z3, dim=2)[0]
+
+        _, group_input_tokens = self.itsi(global_feat)
+        t = self.sa(group_input_tokens)
+        refine = self.offset(t)
+        return refine.contiguous()
+
+# ==========================================================================================
+# 🛑 POINTMAC MODULAR COMPONENTS END
+# ==========================================================================================
 
 class FeatureExtractor(nn.Module):
     def __init__(self, out_dim=1024):

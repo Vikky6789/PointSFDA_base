@@ -103,8 +103,53 @@ def test(cfg, epoch_idx=-1, test_dataset = None, test_data_loader=None, test_wri
                 gt, partial, label = data
                 gt = gt.float().cuda()
                 partial = partial.float().cuda()
-              
-                pcd_out = model(partial.contiguous())
+                
+                # 👇 POINTMAC TEST-TIME ADAPTATION (Algorithm 1)
+                if getattr(cfg, 'use_pointmac', False):
+                    import copy
+                    
+                    # 1. Save original encoder weights
+                    orig_encoder_state = copy.deepcopy(model.module.feat_extractor.state_dict())
+                    
+                    # 2. Setup TTA (Freeze Decoder & Aux, Unfreeze Encoder)
+                    model.eval() # Keep dropout/BN in eval mode
+                    for param in model.parameters(): param.requires_grad = False
+                    for param in model.module.feat_extractor.parameters(): param.requires_grad = True
+                    
+                    optimizer_tta = torch.optim.Adam(model.module.feat_extractor.parameters(), lr=1e-4)
+                    
+                    # 3. TTA Loop (3 Steps)
+                    # Dhyan rahe, TTA mein hume gradients chahiye, isliye torch.enable_grad() use kiya
+                    with torch.enable_grad():
+                        for _ in range(3):
+                            optimizer_tta.zero_grad()
+                            _, aux_outputs = model(partial.contiguous(), return_aux=True)
+                            
+                            mae_rec = aux_outputs['mae_rec']
+                            denoise_offset = aux_outputs['denoise_offset']
+                            
+                            # Calculate auxiliary losses
+                            loss_aux1 = get_cd(mae_rec, partial, sqrt=False) * 1e2
+                            loss_aux2 = torch.mean(denoise_offset ** 2) * 1e2 
+                            
+                            # (Lambda weights are fixed during test time, using simple average here)
+                            loss_ada = 0.5 * loss_aux1 + 0.5 * loss_aux2 
+                            loss_ada.backward()
+                            optimizer_tta.step()
+                    
+                    # 4. Final Forward Pass (with adapted encoder)
+                    with torch.no_grad():
+                        pcd_out = model(partial.contiguous(), return_aux=False)
+                    
+                    # 5. RESTORE original encoder weights for the next test sample!
+                    model.module.feat_extractor.load_state_dict(orig_encoder_state)
+                    for param in model.parameters(): param.requires_grad = False # freeze back
+                    
+                else:
+                    # 🏃 ORIGINAL INFERENCE (No PointMAC)
+                    with torch.no_grad():
+                        pcd_out = model(partial.contiguous())
+                # 👆 ==========================================
                 pcd_pred = pcd_out[-1]
 
                 

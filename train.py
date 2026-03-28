@@ -125,7 +125,7 @@ def train(cfg):
     device = torch.device("cuda")
     model = model.to(device)
     source_model = source_model.to(device)
-    scaler = torch.cuda.amp.GradScaler() # H100 ke liye ye yahan define kar
+    scaler = torch.amp.GradScaler('cuda') # H100 ke liye updated syntax
     
     logging.info('✅ Weights loaded and models moved to GPU!')
 
@@ -175,7 +175,8 @@ def train(cfg):
 
         model.train()
         source_model.eval()
-        discriminator.train()
+        if discriminator is not None:
+            discriminator.train()
 
         total_uhd = 0
         total_ucd = 0

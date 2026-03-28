@@ -132,11 +132,15 @@ def train(cfg):
     optimizer, scheduler = builder.build_opti_sche(model, cfg)
     
     # === ⚖️ Coarse GAN Setup ===
-    logging.info("⚖️ Initializing Coarse Adversarial Discriminator...")
-    discriminator = CoarsePointDiscriminator().to(device)
-    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.999))
-    criterion_gan = nn.MSELoss().to(device)
-    alpha_gan = 0.05
+    discriminator = None # Default value taaki aage crash na ho
+    alpha_gan = 0.0      # Default weight 0
+    
+    if getattr(cfg, 'use_gan', False):
+        logging.info("⚖️ Initializing Coarse Adversarial Discriminator...")
+        discriminator = CoarsePointDiscriminator().to(device)
+        optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.999))
+        criterion_gan = nn.MSELoss().to(device)
+        alpha_gan = 0.05
     # ==========================
     
     # 👇 YE BLOCK ADD KAR (PointMAC Lambda Setup):
@@ -322,24 +326,27 @@ def train(cfg):
                     # =========================================================
                     # 🥊 NEW GAN CODE: ADVERSARIAL ALIGNMENT (DISCRIMINATOR)
                     # =========================================================
-                    coarse_real = coarse_source.detach()
-                    coarse_fake = coarse_pcd1
+                    loss_G_adv = torch.tensor(0.0) # Default value taaki aage logger crash na kare
                     
-                    valid_labels = torch.ones((bs, 1), dtype=torch.float32, device=device)
-                    fake_labels = torch.zeros((bs, 1), dtype=torch.float32, device=device)
+                    if getattr(cfg, 'use_gan', False):
+                        coarse_real = coarse_source.detach()
+                        coarse_fake = coarse_pcd1
+                        
+                        valid_labels = torch.ones((bs, 1), dtype=torch.float32, device=device)
+                        fake_labels = torch.zeros((bs, 1), dtype=torch.float32, device=device)
 
-                    # --- Step A: Train Discriminator ---
-                    optimizer_D.zero_grad()
-                    loss_D_real = criterion_gan(discriminator(coarse_real), valid_labels)
-                    loss_D_fake = criterion_gan(discriminator(coarse_fake.detach()), fake_labels)
+                        # --- Step A: Train Discriminator ---
+                        optimizer_D.zero_grad()
+                        loss_D_real = criterion_gan(discriminator(coarse_real), valid_labels)
+                        loss_D_fake = criterion_gan(discriminator(coarse_fake.detach()), fake_labels)
 
-                    loss_D = 0.5 * (loss_D_real + loss_D_fake)
-                    scaler.scale(loss_D).backward()
-                    scaler.step(optimizer_D)
-                    
-                    # --- Step B: Generator (Target Model) Adversarial Loss ---
-                    loss_G_adv = criterion_gan(discriminator(coarse_fake), valid_labels)
-                    loss_total = loss_total + (alpha_gan * loss_G_adv)
+                        loss_D = 0.5 * (loss_D_real + loss_D_fake)
+                        scaler.scale(loss_D).backward()
+                        scaler.step(optimizer_D)
+                        
+                        # --- Step B: Generator (Target Model) Adversarial Loss ---
+                        loss_G_adv = criterion_gan(discriminator(coarse_fake), valid_labels)
+                        loss_total = loss_total + (alpha_gan * loss_G_adv)
                     # =========================================================
 
                 # 🔥 Optimized Backward

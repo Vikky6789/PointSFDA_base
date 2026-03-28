@@ -37,6 +37,8 @@ def get_args_from_command_line():
     parser.add_argument('--config', type=str, default='./configs/snow.yaml', help='Configuration File')
     parser.add_argument('--test', dest='test', help='Test neural networks', action='store_true')
     parser.add_argument('--use_pointmac', action='store_true', help='Enable PointMAC MAML Training & TTA')
+    # argparse setup ke andar:
+    parser.add_argument('--use_gan', action='store_true', help='Enable Coarse Adversarial Alignment (GAN)')
     args = parser.parse_args()
     return args
 
@@ -46,6 +48,9 @@ if __name__ == '__main__':
 
     cfg.use_pointmac = args.use_pointmac
     if 'model' in cfg: cfg.model.use_pointmac = args.use_pointmac
+    
+    # Jahan config load ho rahi hai:
+    cfg.use_gan = args.use_gan
     
     set_seed(cfg.train.seed)
     logging.basicConfig(format='[%(levelname)s] %(asctime)s %(message)s', level=logging.DEBUG)

@@ -36,9 +36,11 @@ def get_args_from_command_line():
     parser = argparse.ArgumentParser(description='The argument parser of SnowflakeNet')
     parser.add_argument('--config', type=str, default='./configs/snow.yaml', help='Configuration File')
     parser.add_argument('--test', dest='test', help='Test neural networks', action='store_true')
+    
+    # --- Custom Flags for PointMAC and GAN ---
     parser.add_argument('--use_pointmac', action='store_true', help='Enable PointMAC MAML Training & TTA')
-    # argparse setup ke andar:
     parser.add_argument('--use_gan', action='store_true', help='Enable Coarse Adversarial Alignment (GAN)')
+    
     args = parser.parse_args()
     return args
 
@@ -46,12 +48,13 @@ if __name__ == '__main__':
     args = get_args_from_command_line()
     cfg = yaml_reader.read_yaml(args.config)
 
+    # --- Config Injection ---
     cfg.use_pointmac = args.use_pointmac
-    if 'model' in cfg: cfg.model.use_pointmac = args.use_pointmac
-    
-    # Jahan config load ho rahi hai:
+    if 'model' in cfg: 
+        cfg.model.use_pointmac = args.use_pointmac
+        
     cfg.use_gan = args.use_gan
-    
+
     set_seed(cfg.train.seed)
     logging.basicConfig(format='[%(levelname)s] %(asctime)s %(message)s', level=logging.DEBUG)
     torch.backends.cudnn.benchmark = True

@@ -212,7 +212,12 @@ class GeneratedDataset(data.Dataset):
                 self.gts.extend([np.load(itm).astype(np.float32) for itm in comp_files])
                 self.classes.extend([cat_id] * len(part_files))
         else:
-            cat_id = self.cat_ordered_list.index(self.category.lower())
+            # Safe category indexing to prevent crashes on unseen classes
+            if self.category.lower() in self.cat_ordered_list:
+                cat_id = self.cat_ordered_list.index(self.category.lower())
+            else:
+                cat_id = 0 # Default fail-safe fallback
+                
             part_files, comp_files = load_paths(self.category)
             
             self.inputs = [np.load(itm).astype(np.float32) for itm in part_files]

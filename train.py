@@ -30,6 +30,11 @@ from utils.misc import *
 from validate import validate
 from collections import OrderedDict
 
+# === 🚀 NEW IMPORT FOR ADVERSARIAL ALIGNMENT ===
+from adversarial_alignment.discriminator import CoarsePointDiscriminator
+import torch.nn as nn
+# ===============================================
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -126,6 +131,14 @@ def train(cfg):
 
     optimizer, scheduler = builder.build_opti_sche(model, cfg)
     
+    # === ⚖️ Coarse GAN Setup ===
+    logging.info("⚖️ Initializing Coarse Adversarial Discriminator...")
+    discriminator = CoarsePointDiscriminator().to(device)
+    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.999))
+    criterion_gan = nn.MSELoss().to(device)
+    alpha_gan = 0.05
+    # ==========================
+    
     # 👇 YE BLOCK ADD KAR (PointMAC Lambda Setup):
     if getattr(cfg, 'use_pointmac', False):
         logging.info("🧠 Initializing PointMAC Meta-Learning Lambdas...")
@@ -158,6 +171,7 @@ def train(cfg):
 
         model.train()
         source_model.eval()
+        discriminator.train()
 
         total_uhd = 0
         total_ucd = 0
@@ -305,6 +319,29 @@ def train(cfg):
                         loss_total = loss_main + meta_weight * loss_aux_total
                     # ---------------------------------------------------------
 
+                    # =========================================================
+                    # 🥊 NEW GAN CODE: ADVERSARIAL ALIGNMENT (DISCRIMINATOR)
+                    # =========================================================
+                    coarse_real = coarse_source.detach()
+                    coarse_fake = coarse_pcd1
+                    
+                    valid_labels = torch.ones((bs, 1), dtype=torch.float32, device=device)
+                    fake_labels = torch.zeros((bs, 1), dtype=torch.float32, device=device)
+
+                    # --- Step A: Train Discriminator ---
+                    optimizer_D.zero_grad()
+                    loss_D_real = criterion_gan(discriminator(coarse_real), valid_labels)
+                    loss_D_fake = criterion_gan(discriminator(coarse_fake.detach()), fake_labels)
+
+                    loss_D = 0.5 * (loss_D_real + loss_D_fake)
+                    scaler.scale(loss_D).backward()
+                    scaler.step(optimizer_D)
+                    
+                    # --- Step B: Generator (Target Model) Adversarial Loss ---
+                    loss_G_adv = criterion_gan(discriminator(coarse_fake), valid_labels)
+                    loss_total = loss_total + (alpha_gan * loss_G_adv)
+                    # =========================================================
+
                 # 🔥 Optimized Backward
                 optimizer.zero_grad()
                 if getattr(cfg, 'use_pointmac', False):
@@ -334,7 +371,7 @@ def train(cfg):
                 # 🔥 TERA CUSTOM STEP-BY-STEP LOGGER 🔥
                 # Har 1 batch ke baad terminal pe ek detail print karega
                 if batch_idx % 20 == 0:
-                    logging.info(f"👉 [Epoch {epoch_idx}] Batch {batch_idx}/{n_batches} processed! | UCD Loss: {ucd:.4f} | CD Coarse: {cd_coarse:.4f}")
+                    logging.info(f"👉 [Epoch {epoch_idx}] Batch {batch_idx}/{n_batches} processed! | UCD: {ucd:.4f} | CD Coarse: {cd_coarse:.4f} | GAN Loss: {loss_G_adv.item():.4f}")
                 # t.set_postfix(loss='%s' % ['%.4f' % l for l in [ucd,  consistency]])
                 if cfg.scheduler.type == 'GradualWarmup':
                     if n_itr < cfg.scheduler.kwargs_2.total_epoch:

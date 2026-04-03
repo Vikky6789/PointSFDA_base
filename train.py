@@ -1,3 +1,7 @@
+============================================================
+📄 FILE: train.py
+============================================================
+
 # # -*- coding: utf-8 -*-
 # # -*- coding: utf-8 -*-
 # # @Author: Sanvik
@@ -484,6 +488,29 @@ from collections import OrderedDict
 # === 🚀 NEW IMPORT FOR ADVERSARIAL ALIGNMENT ===
 from adversarial_alignment.discriminator import CoarsePointDiscriminator
 import torch.nn as nn
+
+# 🔥 NAN SHIELD: Safe Native Distance Functions
+def get_safe_squared_dist(p1, p2):
+    p1_sq = torch.sum(p1**2, dim=-1, keepdim=True)
+    p2_sq = torch.sum(p2**2, dim=-1).unsqueeze(1)
+    dist = p1_sq + p2_sq - 2 * torch.bmm(p1, p2.transpose(1, 2))
+    return torch.clamp(dist, min=1e-7)
+
+def chamfer_distance_native(p1, p2, sqrt=False):
+    dist = get_safe_squared_dist(p1, p2)
+    if sqrt:
+        dist = torch.sqrt(dist)
+    min_dist_1 = torch.min(dist, dim=2)[0]
+    min_dist_2 = torch.min(dist, dim=1)[0]
+    return torch.mean(min_dist_1) + torch.mean(min_dist_2)
+
+def unidirectional_cd_native(p1, p2, sqrt=False):
+    dist = get_safe_squared_dist(p1, p2)
+    if sqrt:
+        dist = torch.sqrt(dist)
+    min_dist = torch.min(dist, dim=2)[0]
+    return torch.mean(min_dist)
+# ---------------------------------------------
 # ===============================================
 
 def set_seed(seed):

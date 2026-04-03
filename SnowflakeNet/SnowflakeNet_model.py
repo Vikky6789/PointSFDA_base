@@ -5,6 +5,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F # Added for PointMAC ITSI
+from torch.func import functional_call # 🔥 Required for MAML fast_weights
 from SnowflakeNet.SnowflakeNet_utils import PointNet_SA_Module_KNN, MLP_Res, MLP_CONV, fps_subsample, Transformer
 from SnowflakeNet.skip_transformer import SkipTransformer
 
@@ -81,28 +82,35 @@ class ExtendedModel(nn.Module):
                     nn.init.zeros_(m.bias)
 
     def _random_mask_points(self, x):
-        if self.mask_ratio <= 0 or not self.training:
-            return x
         B, N, C = x.shape
-        N_keep = max(1, int(N * (1.0 - self.mask_ratio)))
+        if not self.training: return x
+        
+        # 🛡️ SAFETY CHECK: SnowflakeNet needs at least 512 points. 
+        N_keep = max(512, int(N * (1.0 - self.mask_ratio)))
+        
+        # If input cloud is already tiny, skip masking and pad
+        if N < 512:
+            idx = torch.cat([torch.arange(N, device=x.device), torch.randint(0, N, (512 - N,), device=x.device)])
+            return x[:, idx, :]
+        
         noise = torch.rand(B, N, device=x.device)
         ids_keep = torch.topk(noise, k=N_keep, dim=1, largest=False)[1]
         ids_keep_expanded = ids_keep.unsqueeze(-1).expand(-1, -1, C)
-        visible_x = torch.gather(x, dim=1, index=ids_keep_expanded)
-        return visible_x
+        return torch.gather(x, dim=1, index=ids_keep_expanded)
 
-    def forward(self, x):
-        bs, n, _ = x.shape
+    def forward(self, x, fast_weights=None):
         x_visible = self._random_mask_points(x)
         pc_x = x_visible.permute(0, 2, 1).contiguous()
         
-        # ADAPTED for SnowflakeNet: returns only 1 value (z3)
-        z3 = self.feat_extractor_ex(pc_x) 
-        global_feat = torch.max(z3, dim=2)[0] # (B, dim_feat)
-        
+        # 🔥 Fast weights processing for Inner Loop
+        if fast_weights is not None:
+            z3 = functional_call(self.feat_extractor_ex, fast_weights, (pc_x,))
+        else:
+            z3 = self.feat_extractor_ex(pc_x) 
+            
+        global_feat = torch.max(z3, dim=2)[0]
         z_latent, _ = self.itsi(global_feat)
-        x_rec = self.decoder(z_latent)
-        return x_rec.transpose(1, 2).contiguous()
+        return self.decoder(z_latent).transpose(1, 2).contiguous()
 
 class SelfAttentionUnit(nn.Module):
     def __init__(self, in_channels):
@@ -140,23 +148,35 @@ class ExtendedModel2(nn.Module):
         self.sa = SelfAttentionUnit(in_channels=61)
         self.offset = OffsetRegression(in_channels=61)
 
-    def forward(self, pts):
+    def forward(self, pts, add_noise=False, fast_weights=None):
         device = pts.device
-        self.feat_extractor_ex = self.feat_extractor_ex.to(device)
-        self.itsi = self.itsi.to(device)
-        self.sa = self.sa.to(device)
-        self.offset = self.offset.to(device)
-
-        pc_x = pts.permute(0, 2, 1).contiguous()
         
-        # ADAPTED for SnowflakeNet
-        z3 = self.feat_extractor_ex(pc_x)
-        global_feat = torch.max(z3, dim=2)[0]
+        # 🛡️ SAFETY FIX: Ensure input has enough points for SA layers
+        if pts.shape[1] < 512:
+            idx_pad = torch.randint(0, pts.shape[1], (512 - pts.shape[1],), device=device)
+            pts = torch.cat([pts, pts[:, idx_pad, :]], dim=1)
 
+        process_pts = pts + torch.randn_like(pts) * 0.015 if add_noise else pts
+        pc_x = process_pts.permute(0, 2, 1).contiguous()
+        
+        if fast_weights is not None:
+            z3 = functional_call(self.feat_extractor_ex, fast_weights, (pc_x,))
+        else:
+            z3 = self.feat_extractor_ex(pc_x)
+            
+        global_feat = torch.max(z3, dim=2)[0]
         _, group_input_tokens = self.itsi(global_feat)
         t = self.sa(group_input_tokens)
-        refine = self.offset(t)
-        return refine.contiguous()
+        pred_offsets = self.offset(t)
+        
+        # Sync sampling to match pred_offsets size
+        num_avail = process_pts.shape[1]
+        num_sample = min(1024, num_avail)
+        idx = torch.randperm(num_avail, device=device)[:num_sample]
+        base_points = process_pts[:, idx, :]
+        
+        refine = base_points + pred_offsets[:, :num_sample, :]
+        return refine.contiguous(), base_points
 
 # ==========================================================================================
 # 🛑 POINTMAC MODULAR COMPONENTS END
@@ -330,17 +350,21 @@ class SnowflakeNet(nn.Module):
             self.mae_aux = ExtendedModel(self, dim_feat=config.dim_feat)
             self.denoise_aux = ExtendedModel2(self, aux1M=self.mae_aux)
 
-    def forward(self, point_cloud, return_P0=False, return_aux=False):
+    def forward(self, point_cloud, return_P0=False, return_aux=False, adapt_mode=False, fast_weights=None):
         pcd_bnc = point_cloud
-        point_cloud = point_cloud.permute(0, 2, 1).contiguous()
+        pc_permuted = point_cloud.permute(0, 2, 1).contiguous()
 
-        feat = self.feat_extractor(point_cloud)
+        if fast_weights is not None:
+            feat = functional_call(self.feat_extractor, fast_weights, (pc_permuted,))
+        else:
+            feat = self.feat_extractor(pc_permuted)
+            
         out = self.decoder(feat, pcd_bnc, return_P0=return_P0)
 
         if self.use_pointmac and return_aux:
             aux_outputs = {}
-            aux_outputs['mae_rec'] = self.mae_aux(pcd_bnc)
-            aux_outputs['denoise_offset'] = self.denoise_aux(pcd_bnc)
+            aux_outputs['mae_rec'] = self.mae_aux(pcd_bnc, fast_weights=fast_weights)
+            aux_outputs['denoise_pred'], aux_outputs['denoise_target'] = self.denoise_aux(pcd_bnc, add_noise=(self.training or adapt_mode), fast_weights=fast_weights)
             return out, aux_outputs
 
         return out
